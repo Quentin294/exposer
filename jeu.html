@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Jeu Plateformer</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #fff;
+      font-family: 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      margin: auto;
+      background: #222;
+      border: 4px solid #00d9ff;
+    }
+
+    #ui, #pauseMenu, #mainMenu, #successMenu {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      background: rgba(0, 0, 0, 0.75);
+      z-index: 5;
+    }
+
+    #mainMenu, #pauseMenu, #successMenu {
+      background: rgba(0, 0, 0, 0.8);
+    }
+
+    .menu-button {
+      background: #00d9ff;
+      color: #000;
+      border: none;
+      padding: 15px 30px;
+      margin: 10px;
+      border-radius: 10px;
+      font-size: 1.2em;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    .menu-button:hover, .selected {
+      background: #00aacc !important;
+    }
+
+    #scoreBoard {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 2;
+      font-size: 1.2em;
+    }
+
+    #rankDisplay {
+      position: absolute;
+      top: 60px;
+      left: 20px;
+      z-index: 2;
+      font-size: 1.2em;
+      color: #ffd700;
+    }
+
+    .trophy {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 1em;
+      display: none;
+      animation: slideIn 0.5s forwards;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    #successList {
+      text-align: left;
+      margin-top: 20px;
+    }
+
+    #successList li {
+      margin: 5px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="mainMenu">
+    <h1>🎮 Mon Jeu Plateformer</h1>
+    <button class="menu-button" onclick="startGame()">Commencer</button>
+    <button class="menu-button" onclick="openSuccessMenu()">Succès</button>
+  </div>
+
+  <div id="successMenu">
+    <h2>🏆 Succès débloqués</h2>
+    <ul id="successList"></ul>
+    <button class="menu-button" onclick="closeSuccessMenu()">Retour</button>
+  </div>
+
+  <div id="pauseMenu">
+    <button class="menu-button" id="resumeBtn">Reprendre</button>
+    <button class="menu-button" id="restartBtn">Recommencer</button>
+    <button class="menu-button" id="quitBtn">Quitter</button>
+  </div>
+
+  <div id="scoreBoard">Score : 0 | Pièces : 0</div>
+  <div id="rankDisplay">🎖️ Rang : Débutant</div>
+  <div class="trophy" id="trophyNotif"></div>
+  <canvas id="game" width="800" height="400"></canvas>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const scoreBoard = document.getElementById("scoreBoard");
+    const rankDisplay = document.getElementById("rankDisplay");
+    const mainMenu = document.getElementById("mainMenu");
+    const pauseMenu = document.getElementById("pauseMenu");
+    const successMenu = document.getElementById("successMenu");
+    const trophyNotif = document.getElementById("trophyNotif");
+    const successList = document.getElementById("successList");
+
+    let player, enemies, coins, gravity, score, coinsCollected, rank, keys, gameRunning, gamePaused, animationId, achievements;
+    let lastEnemyTime = 0;
+    let lastCoinTime = 0;
+
+    const successDefs = [
+      { name: "🎉 Premier saut", condition: () => player.jumpedOnce },
+      { name: "💰 5 pièces", condition: () => coinsCollected >= 5 },
+      { name: "🥇 10 pièces", condition: () => coinsCollected >= 10 },
+      { name: "👟 100 mètres", condition: () => score >= 100 },
+      { name: "🏆 Marathonien", condition: () => score >= 300 }
+    ];
+
+    function initGame() {
+      player = { x: 50, y: 300, w: 30, h: 30, vy: 0, grounded: false, jumpedOnce: false };
+      enemies = [];
+      coins = [];
+      gravity = 0.6;
+      score = 0;
+      coinsCollected = 0;
+      rank = "Débutant";
+      keys = {};
+      gameRunning = false;
+      gamePaused = false;
+      achievements = {};
+    }
+
+    function startGame() {
+      initGame();
+      mainMenu.style.display = "none";
+      scoreBoard.style.display = "block";
+      rankDisplay.style.display = "block";
+      gameRunning = true;
+      update();
+    }
+
+    function openSuccessMenu() {
+      mainMenu.style.display = "none";
+      successMenu.style.display = "flex";
+      updateSuccessList();
+    }
+
+    function closeSuccessMenu() {
+      successMenu.style.display = "none";
+      mainMenu.style.display = "flex";
+    }
+
+    function updateSuccessList() {
+      successList.innerHTML = '';
+      for (let s of successDefs) {
+        if (achievements[s.name]) {
+          const li = document.createElement('li');
+          li.textContent = s.name;
+          successList.appendChild(li);
+        }
+      }
+    }
+
+    function showSuccess(name) {
+      if (!achievements[name]) {
+        achievements[name] = true;
+        trophyNotif.textContent = "🏆 Succès : " + name;
+        trophyNotif.style.display = "block";
+        setTimeout(() => {
+          trophyNotif.style.display = "none";
+        }, 3000);
+      }
+    }
+
+    function getRank(pieces) {
+      if (pieces >= 30) return "👑 Dieu du jeu";
+      if (pieces >= 20) return "🏆 Légende";
+      if (pieces >= 10) return "💰 Chasseur";
+      if (pieces >= 5) return "🧭 Explorateur";
+      if (pieces >= 1) return "🔰 Joueur";
+      return "🎮 Débutant";
+    }
+
+    function spawnEnemy() {
+      enemies.push({ x: canvas.width, y: 370, w: 30, h: 30, speed: 3 });
+    }
+
+    function spawnCoin() {
+      coins.push({ x: canvas.width, y: Math.random() * 150 + 150, r: 10, speed: 2 });
+    }
+
+    function togglePause() {
+      if (!gameRunning) return;
+      gamePaused = !gamePaused;
+      pauseMenu.style.display = gamePaused ? "flex" : "none";
+      if (!gamePaused) update();
+    }
+
+    document.addEventListener("keydown", e => {
+      keys[e.code] = true;
+      if (e.code === "Space") togglePause();
+      if (e.code === "ArrowUp" && player.grounded && !gamePaused) {
+        player.vy = -12;
+        player.grounded = false;
+        player.jumpedOnce = true;
+      }
+    });
+
+    document.addEventListener("keyup", e => keys[e.code] = false);
+
+    document.getElementById("resumeBtn").onclick = togglePause;
+    document.getElementById("quitBtn").onclick = () => {
+      gameRunning = false;
+      pauseMenu.style.display = "none";
+      mainMenu.style.display = "flex";
+      scoreBoard.style.display = "none";
+      rankDisplay.style.display = "none";
+      cancelAnimationFrame(animationId);
+    };
+    document.getElementById("restartBtn").onclick = () => {
+      pauseMenu.style.display = "none";
+      startGame();
+    };
+
+    function update() {
+      if (!gameRunning || gamePaused) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      score++;
+      if (Date.now() - lastEnemyTime > 3000) {
+        spawnEnemy();
+        lastEnemyTime = Date.now();
+      }
+      if (Date.now() - lastCoinTime > 2000) {
+        spawnCoin();
+        lastCoinTime = Date.now();
+      }
+
+      player.vy += gravity;
+      player.y += player.vy;
+      if (player.y + player.h >= canvas.height) {
+        player.y = canvas.height - player.h;
+        player.vy = 0;
+        player.grounded = true;
+      }
+
+      ctx.fillStyle = "#00ffe1";
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+
+      // Enemies
+      ctx.fillStyle = "red";
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        let e = enemies[i];
+        e.x -= e.speed;
+        ctx.fillRect(e.x, e.y, e.w, e.h);
+        if (e.x + e.w < 0) enemies.splice(i, 1);
+        if (player.x < e.x + e.w && player.x + player.w > e.x && player.y < e.y + e.h && player.y + player.h > e.y) {
+          gameOver();
+          return;
+        }
+      }
+
+      // Coins
+      ctx.fillStyle = "gold";
+      for (let i = coins.length - 1; i >= 0; i--) {
+        let c = coins[i];
+        c.x -= c.speed;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+        ctx.fill();
+        if (player.x < c.x + c.r && player.x + player.w > c.x - c.r && player.y < c.y + c.r && player.y + player.h > c.y - c.r) {
+          coinsCollected++;
+          coins.splice(i, 1);
+        }
+        if (c.x + c.r < 0) coins.splice(i, 1);
+      }
+
+      scoreBoard.textContent = "Score : " + score + " | Pièces : " + coinsCollected;
+      rankDisplay.textContent = "🎖️ Rang : " + getRank(coinsCollected);
+
+      successDefs.forEach(s => {
+        if (s.condition()) showSuccess(s.name);
+      });
+
+      animationId = requestAnimationFrame(update);
+    }
+
+    function gameOver() {
+      gameRunning = false;
+      setTimeout(() => {
+        if (confirm("💥 Tu as perdu ! Recommencer ?")) {
+          startGame();
+        } else {
+          mainMenu.style.display = "flex";
+          scoreBoard.style.display = "none";
+          rankDisplay.style.display = "none";
+        }
+      }, 100);
+    }
+
+    mainMenu.style.display = "flex";
+  </script>
+
+</body>
+</html>
